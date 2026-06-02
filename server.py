@@ -38,16 +38,25 @@ def index():
     return '<h2 style="font-family:sans-serif;color:#ff3d6e;padding:40px;">TradeMind_Tools.html not found in same folder as server.py</h2>'
 
 # ── Load historical OHLCV from Binance ───────────────────────
-def load_history(symbol, interval='1h', limit=200):
+def load_history(symbol, interval='1h', limit=500):
+    # Fetch up to 1000 candles using pagination (Binance max = 1000 per request)
     try:
-        res  = requests.get('https://api.binance.com/api/v3/klines',
-                            params={'symbol': symbol, 'interval': interval, 'limit': limit},
-                            timeout=10)
+        all_candles = []
+        end_time = None
+        fetch_limit = min(limit, 1000)  # Binance allows max 1000
+
+        res = requests.get('https://api.binance.com/api/v3/klines',
+                           params={'symbol': symbol, 'interval': interval,
+                                   'limit': fetch_limit},
+                           timeout=10)
         data = res.json()
-        out  = [{'time': int(k[0])//1000, 'open': float(k[1]),
-                 'high': float(k[2]),  'low':  float(k[3]),
-                 'close':float(k[4]),  'volume':float(k[5])} for k in data]
-        print(f"  ✅ {symbol}: {len(out)} candles loaded")
+        if not isinstance(data, list):
+            return []
+
+        out = [{'time': int(k[0])//1000, 'open': float(k[1]),
+                'high': float(k[2]),  'low':  float(k[3]),
+                'close':float(k[4]),  'volume':float(k[5])} for k in data]
+        print(f"  ✅ {symbol} ({interval}): {len(out)} candles loaded")
         return out
     except Exception as e:
         print(f"  ❌ {symbol} failed: {e}")
@@ -239,8 +248,18 @@ def on_connect():
 
 @socket.on('request_history')
 def on_req_hist(data):
-    sym = data.get('symbol','BTCUSDT')
-    socket.emit('history_data',{'symbol':sym,'candles':candles.get(sym,[])})
+    sym      = data.get('symbol', 'BTCUSDT')
+    interval = data.get('interval', '1h')
+    # If client requests different interval, fetch fresh
+    if interval != '1h' and sym in candles:
+        fresh = load_history(sym, interval=interval, limit=1000)
+        if fresh:
+            socket.emit('history_data', {'symbol': sym, 'candles': fresh,
+                                         'interval': interval})
+            return
+    socket.emit('history_data', {'symbol': sym,
+                                  'candles': candles.get(sym, []),
+                                  'interval': interval})
 
 # ── Startup ───────────────────────────────────────────────────
 if __name__ == '__main__':

@@ -1173,27 +1173,58 @@ function renderShadows(){
 
 function drawAITrendlines(){
   const cs=S.candles;if(cs.length<10)return;
+
+  // Remove ALL previous AI trendlines before drawing new ones
+  if(!S._aiTrendlines) S._aiTrendlines=[];
+  S._aiTrendlines.forEach(pl=>{ try{ S.mainSeries.removePriceLine(pl); }catch(e){} });
+  S._aiTrendlines=[];
+
   const pivLows=[];
-  for(let i=2;i<cs.length-2;i++){if(cs[i].low<cs[i-1].low&&cs[i].low<cs[i+1].low)pivLows.push({i,v:cs[i].low});}
+  for(let i=2;i<cs.length-2;i++){
+    if(cs[i].low<cs[i-1].low&&cs[i].low<cs[i+1].low)
+      pivLows.push({i,v:cs[i].low});
+  }
+  // Only draw ONE best uptrend trendline
   if(pivLows.length>=2){
     const l1=pivLows[pivLows.length-2],l2=pivLows[pivLows.length-1];
-    if(l2.v>l1.v)S.mainSeries.createPriceLine({price:l2.v,color:'rgba(0,229,160,.55)',lineWidth:1,lineStyle:2,title:'AI Trendline ↑'});
+    if(l2.v>l1.v){
+      const pl=S.mainSeries.createPriceLine({
+        price:l2.v,color:'rgba(0,229,160,.7)',
+        lineWidth:1,lineStyle:2,title:'AI Support ↑'
+      });
+      S._aiTrendlines.push(pl);
+    }
   }
+
   const pivHighs=[];
-  for(let i=2;i<cs.length-2;i++){if(cs[i].high>cs[i-1].high&&cs[i].high>cs[i+1].high)pivHighs.push({i,v:cs[i].high});}
+  for(let i=2;i<cs.length-2;i++){
+    if(cs[i].high>cs[i-1].high&&cs[i].high>cs[i+1].high)
+      pivHighs.push({i,v:cs[i].high});
+  }
+  // Only draw ONE best downtrend trendline
   if(pivHighs.length>=2){
     const h1=pivHighs[pivHighs.length-2],h2=pivHighs[pivHighs.length-1];
-    if(h2.v<h1.v)S.mainSeries.createPriceLine({price:h2.v,color:'rgba(255,61,110,.55)',lineWidth:1,lineStyle:2,title:'AI Trendline ↓'});
+    if(h2.v<h1.v){
+      const pl=S.mainSeries.createPriceLine({
+        price:h2.v,color:'rgba(255,61,110,.7)',
+        lineWidth:1,lineStyle:2,title:'AI Resistance ↓'
+      });
+      S._aiTrendlines.push(pl);
+    }
   }
   document.getElementById('sb-ai2').textContent='READY';
 }
 
 function drawSR(){
   const cs=S.candles.slice(-50);
+  if(!S._srLines)S._srLines=[];
+  S._srLines.forEach(pl=>{ try{ S.mainSeries.removePriceLine(pl); }catch(e){} });
+  S._srLines=[];
   const highs=[...cs.map(c=>c.high)].sort((a,b)=>b-a);
   const lows=[...cs.map(c=>c.low)].sort((a,b)=>a-b);
-  S.mainSeries.createPriceLine({price:highs[3],color:'rgba(255,61,110,.45)',lineWidth:1,lineStyle:3,title:'Resistance'});
-  S.mainSeries.createPriceLine({price:lows[3],color:'rgba(0,229,160,.45)',lineWidth:1,lineStyle:3,title:'Support'});
+  const r=S.mainSeries.createPriceLine({price:highs[3],color:'rgba(255,61,110,.55)',lineWidth:1,lineStyle:3,title:'Resistance'});
+  const s=S.mainSeries.createPriceLine({price:lows[3],color:'rgba(0,229,160,.55)',lineWidth:1,lineStyle:3,title:'Support'});
+  S._srLines.push(r,s);
 }
 
 // ══════════════════════════════════════════════
@@ -1566,11 +1597,17 @@ function setCoin(sym,price,change,btn){
 }
 
 function setTF(btn,mins){
-  S.tf=mins;document.querySelectorAll('.tfbtn').forEach(b=>b.classList.remove('on'));btn.classList.add('on');
+  S.tf=mins;
+  document.querySelectorAll('.tfbtn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
   if(S.rpMode)rp_stop();
-  // Close existing WebSocket
   if(_ws){try{_ws.close();}catch(e){}_ws=null;}
   loadData();
+  // Also request correct interval from live server
+  if(typeof liveSocket!=='undefined'&&liveSocket&&liveSocket.connected){
+    const tfMap3={1:'1m',3:'3m',5:'5m',15:'15m',30:'30m',60:'1h',240:'4h',1440:'1d',10080:'1w'};
+    liveSocket.emit('request_history',{symbol:S.coin+'USDT',interval:tfMap3[mins]||'1h'});
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -1617,7 +1654,8 @@ document.addEventListener('DOMContentLoaded',function(){
         setSbStatus('LIVE ●', 'var(--G)');
         toast('Connected to live server!','g');
         // Request history for current coin
-        liveSocket.emit('request_history', { symbol: S.coin + 'USDT' });
+        const tfMap={1:'1m',3:'3m',5:'5m',15:'15m',30:'30m',60:'1h',240:'4h',1440:'1d',10080:'1w'};
+      liveSocket.emit('request_history', { symbol: S.coin + 'USDT', interval: tfMap[S.tf]||'1h' });
       });
 
       liveSocket.on('disconnect', function(){
@@ -1741,7 +1779,8 @@ document.addEventListener('DOMContentLoaded',function(){
   window.setCoin = function(sym, price, change, btn){
     _origSetCoin(sym, price, change, btn);
     if(serverConnected && liveSocket){
-      liveSocket.emit('request_history', { symbol: sym + 'USDT' });
+      const tfMap2={1:'1m',3:'3m',5:'5m',15:'15m',30:'30m',60:'1h',240:'4h',1440:'1d',10080:'1w'};
+      liveSocket.emit('request_history', { symbol: sym + 'USDT', interval: tfMap2[S.tf]||'1h' });
     }
   };
 
