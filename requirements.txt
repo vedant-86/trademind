@@ -1,0 +1,8 @@
+flask
+flask-socketio
+websocket-client
+requests
+pandas
+numpy
+eventlet
+gunicorn
