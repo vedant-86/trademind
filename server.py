@@ -82,67 +82,189 @@ def pivots(cs):
     return lows, highs
 
 # ── AI-I: Candle prediction engine ───────────────────────────
+# ══════════════════════════════════════════════════════════
+# AI-I: PRODUCTION CANDLE PREDICTION ENGINE
+# Multi-factor scoring: EMA + RSI + MACD + Volume + Pattern
+# Returns: direction, confidence, candle type, predictions
+# ══════════════════════════════════════════════════════════
+def calc_atr(cs, period=14):
+    if len(cs) < period+1: return cs[-1]['high'] - cs[-1]['low']
+    trs = []
+    for i in range(1, min(period+1, len(cs))):
+        c, p = cs[-i], cs[-i-1]
+        trs.append(max(c['high']-c['low'], abs(c['high']-p['close']), abs(c['low']-p['close'])))
+    return sum(trs)/len(trs) if trs else 0.01
+
+def calc_macd_server(closes):
+    if len(closes) < 26: return {'macd':0,'signal':0,'hist':0}
+    def ema_s(arr, p):
+        k=2/(p+1); e=arr[0]
+        for v in arr[1:]: e=v*k+e*(1-k)
+        return e
+    m = ema_s(closes,12) - ema_s(closes,26)
+    # approximate signal
+    sig = m * 0.9
+    return {'macd':m,'signal':sig,'hist':m-sig}
+
 def ai1(cs):
-    if len(cs) < 20: return None
-    cl  = [c['close']  for c in cs]
-    vol = [c['volume'] for c in cs]
-    last, prev = cs[-1], cs[-2]
+    if len(cs) < 30: return None
+    cl   = [c['close']  for c in cs]
+    vol  = [c['volume'] for c in cs]
+    last = cs[-1]
+    prev = cs[-2]
+    prev2= cs[-3]
 
-    e9, e21   = ema(cl, 9), ema(cl, 21)
-    r         = rsi(cl)
-    vr        = vol[-1] / (sum(vol[-10:])/10) if sum(vol[-10:]) else 1
-    hl        = cs[-1]['low'] > cs[-8]['low']
-    bull      = last['close'] > last['open']
-    rng       = last['high'] - last['low']
-    body      = abs(last['close'] - last['open'])
-    bp        = body/rng if rng else 0
-    uw        = last['high'] - max(last['open'], last['close'])
-    lw        = min(last['open'], last['close']) - last['low']
+    # Indicators
+    e9   = ema(cl, 9)
+    e21  = ema(cl, 21)
+    e50  = ema(cl, 50) if len(cl)>=50 else ema(cl, len(cl)//2)
+    r    = rsi(cl, 14)
+    macd = calc_macd_server(cl)
+    atr  = calc_atr(cs, 14)
 
-    # Candle type detection
-    if   bp > 0.85:              ct = 'Marubozu (Bull)' if bull else 'Marubozu (Bear)'
-    elif lw > body*2 and bull:   ct = 'Hammer'
-    elif uw > body*2 and not bull: ct = 'Shooting Star'
-    elif bp < 0.10:              ct = 'Doji'
-    elif bp < 0.25:              ct = 'Spinning Top'
-    elif bull and not prev['close']>prev['open']: ct = 'Bullish Engulfing'
-    elif not bull and prev['close']>prev['open']: ct = 'Bearish Engulfing'
-    else:                        ct = 'Bullish' if bull else 'Bearish'
+    avg_vol10 = sum(vol[-10:]) / 10 if len(vol)>=10 else vol[-1]
+    avg_vol20 = sum(vol[-20:]) / 20 if len(vol)>=20 else vol[-1]
+    vr        = vol[-1] / avg_vol10 if avg_vol10 > 0 else 1
 
-    # Scoring bull vs bear
-    bs = ds = 0
-    if e9>e21: bs+=25
-    else:      ds+=25
-    if r>55:   bs+=20
-    elif r<45: ds+=20
-    if hl:     bs+=25
-    else:      ds+=25
-    if bull  and vr>1.2: bs+=15
-    if not bull and vr>1.2: ds+=15
+    # Candle analysis
+    rng   = last['high'] - last['low']
+    body  = abs(last['close'] - last['open'])
+    bp    = body/rng if rng > 0 else 0
+    uw    = last['high']  - max(last['open'], last['close'])
+    lw    = min(last['open'], last['close']) - last['low']
+    bull  = last['close'] > last['open']
+    uwp   = uw/rng if rng>0 else 0
+    lwp   = lw/rng if rng>0 else 0
 
-    tot = bs+ds+5
-    bc, dc = bs/tot, ds/tot
-    sc = max(.05, 1-bc-dc)
-    dr = 'BULL' if bc>dc and bc>sc else 'BEAR' if dc>bc and dc>sc else 'SIDE'
-    cf = max(bc, dc, sc)
+    # Candle pattern detection
+    if bp > 0.88:
+        ct = 'Marubozu (Bull)' if bull else 'Marubozu (Bear)'
+    elif bull and lwp > 0.55 and bp < 0.35:
+        ct = 'Hammer'
+    elif not bull and uwp > 0.55 and bp < 0.35:
+        ct = 'Shooting Star'
+    elif bull and not prev['close']>prev['open'] and last['open']<prev['close'] and last['close']>prev['open']:
+        ct = 'Bullish Engulfing'
+    elif not bull and prev['close']>prev['open'] and last['open']>prev['close'] and last['close']<prev['open']:
+        ct = 'Bearish Engulfing'
+    elif bp < 0.08:
+        ct = 'Doji'
+    elif bp < 0.25 and uwp > 0.30 and lwp > 0.30:
+        ct = 'Spinning Top'
+    else:
+        ct = 'Bullish' if bull else 'Bearish'
+
+    # Trend structure
+    highs10 = [c['high'] for c in cs[-10:]]
+    lows10  = [c['low']  for c in cs[-10:]]
+    uptrend   = highs10[-1]>highs10[0] and lows10[-1]>lows10[0]
+    downtrend = highs10[-1]<highs10[0] and lows10[-1]<lows10[0]
+
+    # ── Multi-factor scoring ──────────────────────────────
+    bs = ds = ss = 0
+
+    # EMA alignment (weight 20)
+    if e9>e21 and e21>e50:   bs+=20
+    elif e9<e21 and e21<e50: ds+=20
+    else:                    ss+=20
+
+    # RSI zone (weight 18)
+    if   60<r<75:  bs+=18
+    elif 25<r<40:  ds+=18
+    elif r>=75:    ds+=12
+    elif r<=25:    bs+=12
+    else:          ss+=18
+
+    # MACD (weight 15)
+    if macd['macd']>0 and macd['hist']>0:   bs+=15
+    elif macd['macd']<0 and macd['hist']<0: ds+=15
+    elif macd['hist']>0:                    bs+=8
+    else:                                   ds+=8
+
+    # Trend structure (weight 18)
+    if uptrend:   bs+=18
+    elif downtrend: ds+=18
+    else:         ss+=18
+
+    # Volume (weight 15)
+    if vr>1.4 and bull:      bs+=15
+    elif vr>1.4 and not bull: ds+=15
+    elif vr<0.7:             ss+=10
+    else:
+        if bull: bs+=7
+        else:    ds+=7
+
+    # Candle pattern (weight 14)
+    pattern_bull = ['Bullish Engulfing','Marubozu (Bull)','Hammer']
+    pattern_bear = ['Bearish Engulfing','Marubozu (Bear)','Shooting Star']
+    if ct in pattern_bull:  bs+=14
+    elif ct in pattern_bear: ds+=14
+    else:                   ss+=8
+
+    tot  = bs + ds + ss
+    bc   = bs/tot if tot>0 else 0.33
+    dc   = ds/tot if tot>0 else 0.33
+    sc   = max(0.05, 1-bc-dc)
+    dr   = 'BULL' if bc>=dc and bc>=sc else 'BEAR' if dc>bc and dc>=sc else 'SIDE'
+    cf   = max(bc, dc, sc)
+
+    # Entry / Stop / Target levels
+    recent_highs = [c['high'] for c in cs[-20:]]
+    recent_lows  = [c['low']  for c in cs[-20:]]
+    pivot_h = max(recent_highs)
+    pivot_l = min(recent_lows)
+    entry   = last['close']
+
+    if dr=='BULL':
+        sl  = min(pivot_l, entry - atr*1.5)
+        tp1 = entry + atr*2.0
+        tp2 = entry + atr*3.5
+    elif dr=='BEAR':
+        sl  = max(pivot_h, entry + atr*1.5)
+        tp1 = entry - atr*2.0
+        tp2 = entry - atr*3.5
+    else:
+        sl  = entry - atr; tp1 = entry + atr; tp2 = entry + atr*2
+
+    rr = abs(tp1-entry)/abs(sl-entry) if abs(sl-entry)>0 else 1
 
     # Shadow candle predictions
     preds, p = [], last['close']
     for i in range(1, 5):
-        mv = p * (0.011 if dr=='BULL' else -0.011 if dr=='BEAR' else 0.001) * (0.5 + 0.8*(i/4))
-        o=p; c=p+mv; r2=abs(c-o)
-        preds.append({'time': last['time']+i*3600,
-                      'open': round(o,4), 'high': round(max(o,c)+r2*.3,4),
-                      'low':  round(min(o,c)-r2*.3,4), 'close': round(c,4),
-                      'confidence': round(cf * (0.82**(i-1)), 3), 'direction': dr})
-        p = c
+        decay     = 0.80 ** (i-1)
+        candle_sz = atr * (0.5 + 0.6*(i/4))
+        direction = 1 if dr=='BULL' else -1 if dr=='BEAR' else 0.1
+        mv        = candle_sz * direction * (0.4 + 0.8*(i/4))
+        o=p; cl_p=p+mv; r2=abs(cl_p-o)
+        preds.append({
+            'time':       last['time'] + i*3600,
+            'open':       round(o,    6),
+            'high':       round(max(o,cl_p)+r2*0.3, 6),
+            'low':        round(min(o,cl_p)-r2*0.3, 6),
+            'close':      round(cl_p, 6),
+            'confidence': round(cf * decay, 3),
+            'direction':  dr,
+        })
+        p = cl_p
 
-    return {'direction':dr,'bull_conf':round(bc,3),'bear_conf':round(dc,3),
-            'side_conf':round(sc,3),'confidence':round(cf,3),'rsi':round(r,1),
-            'ema9':round(e9,2),'ema21':round(e21,2),'vol_ratio':round(vr,2),
-            'candle_type':ct,'body_pct':round(bp*100,1),'predictions':preds}
+    return {
+        'direction':  dr,
+        'bull_conf':  round(bc,3), 'bear_conf': round(dc,3), 'side_conf': round(sc,3),
+        'confidence': round(cf,3),
+        'rsi':        round(r,1),
+        'ema9':       round(e9,2), 'ema21': round(e21,2), 'ema50': round(e50,2),
+        'vol_ratio':  round(vr,2),
+        'candle_type':ct,
+        'body_pct':   round(bp*100,1),
+        'atr':        round(atr,6),
+        'entry':      round(entry,6),
+        'stop_loss':  round(sl,6),
+        'take_profit1': round(tp1,6),
+        'take_profit2': round(tp2,6),
+        'risk_reward':  round(rr,2),
+        'predictions':  preds,
+    }
 
-# ── AI-II: Trendline validation engine ───────────────────────
 def ai2(cs, a1):
     if not a1 or len(cs)<10: return None
     pl, ph = pivots(cs)

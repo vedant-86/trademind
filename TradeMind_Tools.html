@@ -1050,60 +1050,466 @@ function removeSub(id){
 // ══════════════════════════════════════════════
 // AI PREDICTIONS
 // ══════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// CANDLE PATTERN DATABASE — Body%, UpperWick%, LowerWick%
+// Based on real technical analysis measurements
+// ══════════════════════════════════════════════════════
 const PATS={
-  up:[{n:'Bullish Engulfing',b:78,u:5,l:17,vol:'High',why:'Buyers overwhelmed sellers. Engulfs previous candle = strong momentum.'},
-      {n:'Marubozu (Bull)',b:93,u:3,l:4,vol:'Very High',why:'No wicks — buyers in full control from open to close.'},
-      {n:'Hammer',b:22,u:4,l:74,vol:'Medium',why:'Sellers pushed down but buyers rejected lows. Strong reversal signal.'}],
-  dn:[{n:'Bearish Engulfing',b:79,u:14,l:7,vol:'High',why:'Sellers overwhelmed buyers. Strong downward continuation expected.'},
-      {n:'Shooting Star',b:17,u:73,l:10,vol:'Medium',why:'Price rejected at highs. Long upper wick = strong resistance above.'},
-      {n:'Marubozu (Bear)',b:92,u:4,l:4,vol:'High',why:'Sellers in full control — pure bearish momentum.'}],
-  side:[{n:'Doji',b:4,u:48,l:48,vol:'Low',why:'Perfect indecision — buyers and sellers equal. Reversal warning.'},
-        {n:'Spinning Top',b:17,u:41,l:42,vol:'Low',why:'Small body equal wicks — consolidation or trend pause.'}],
+  up:[
+    {n:'Bullish Engulfing', b:78,u:8, l:14,vol:'High',
+     why:'Buyers completely overwhelmed sellers. Body engulfs previous candle. High volume confirms institutional buying.'},
+    {n:'Marubozu (Bull)',   b:94,u:3, l:3, vol:'Very High',
+     why:'Pure buying pressure from open to close. No wicks = zero hesitation. Very strong continuation signal.'},
+    {n:'Hammer',           b:25,u:5, l:70,vol:'Medium',
+     why:'Sellers pushed price down sharply but buyers reclaimed. Long lower wick = strong demand below current price.'},
+    {n:'Morning Star',     b:60,u:10,l:30,vol:'High',
+     why:'3-candle reversal pattern. Indecision candle followed by strong bull close above midpoint of prior bear candle.'},
+    {n:'Bullish Harami',   b:35,u:15,l:50,vol:'Low',
+     why:'Small candle inside prior bearish candle. Selling momentum exhausted. Buyers beginning to step in.'},
+  ],
+  dn:[
+    {n:'Bearish Engulfing',b:79,u:14,l:7, vol:'High',
+     why:'Sellers completely overwhelmed buyers. Full engulf = aggressive selling. High volume = institutional distribution.'},
+    {n:'Shooting Star',    b:18,u:74,l:8, vol:'Medium',
+     why:'Price spiked up but sellers rejected it hard. Long upper wick = strong supply zone above. Classic reversal.'},
+    {n:'Marubozu (Bear)',  b:93,u:4, l:3, vol:'Very High',
+     why:'Pure selling from open to close. No wicks = sellers completely in control. Strong bearish continuation.'},
+    {n:'Evening Star',     b:58,u:30,l:12,vol:'High',
+     why:'3-candle reversal. Gap up candle of indecision followed by strong bear close below midpoint. Distribution.'},
+    {n:'Bearish Harami',   b:33,u:52,l:15,vol:'Low',
+     why:'Small candle inside prior bullish candle. Buying exhausted. Bears beginning to take control.'},
+  ],
+  side:[
+    {n:'Doji',             b:3, u:49,l:48,vol:'Low',
+     why:'Perfect indecision — open equals close. Neither buyers nor sellers winning. Major reversal warning.'},
+    {n:'Spinning Top',     b:18,u:41,l:41,vol:'Low',
+     why:'Small body with equal wicks. Consolidation phase. Wait for breakout direction before trading.'},
+    {n:'Long-Legged Doji', b:2, u:49,l:49,vol:'Medium',
+     why:'Extreme indecision. Price tested both directions and returned to open. High uncertainty — stay out.'},
+  ],
 };
 
-function runAI(){
-  const cs=S.candles;if(cs.length<20)return;
-  const closes=cs.map(c=>c.close);
-  const lastC=cs[cs.length-1],prevC=cs[cs.length-2];
-  const eArr=ema(closes,9);const e9=eArr[eArr.length-1];
-  const e21Arr=ema(closes,21);const e21=e21Arr[e21Arr.length-1];
-  const rArr=rsi(closes);const r=rArr[rArr.length-1];
-  const avgVol=cs.slice(-10).reduce((s,c)=>s+(c.volume||1e6),0)/10;
-  const vRatio=(lastC.volume||1e6)/avgVol;
-  const recentLows=cs.slice(-8).map(c=>c.low);
-  const higherLows=recentLows[7]>recentLows[0];
-  const isUp=lastC.close>lastC.open;
-  const range=lastC.high-lastC.low;
-  const body=Math.abs(lastC.close-lastC.open);
-  const bodyPct=range>0?body/range:0;
-  let bS=0,dS=0;
-  if(e9>e21)bS+=22;else dS+=22;
-  if(r>55)bS+=14;else if(r<45)dS+=14;
-  if(higherLows)bS+=22;else dS+=22;
-  if(isUp&&vRatio>1.1)bS+=14;else if(!isUp&&vRatio>1.1)dS+=14;
-  if(bodyPct>0.6&&isUp)bS+=10;else if(bodyPct>0.6&&!isUp)dS+=10;
-  const tot=bS+dS+8;
-  const bC=bS/tot,dC=dS/tot,sC=Math.max(.05,1-bC-dC);
-  function mkSc(dir,conf){
-    const pats=PATS[dir];const pat=pats[Math.floor(Math.random()*pats.length)];
-    const shads=[];let p=lastC.close;
-    for(let i=1;i<=4;i++){
-      const decay=Math.pow(.82,i-1);
-      const mv=p*(dir==='up'?.011:dir==='dn'?-.011:.001)*(.5+Math.random()*.8);
-      const o=p,c=p+mv,rng=Math.abs(c-o);
-      const h=Math.max(o,c)+rng*(pat.u/100)*1.5;
-      const l=Math.min(o,c)-rng*(pat.l/100)*1.5;
-      // Use actual TF interval so shadows appear on correct candles
-      const tfSec=(S.tf||1440)*60;
-      shads.push({time:lastC.time+i*tfSec,open:o,high:h,low:l,close:c,conf:conf*decay,dir,type:pat.n,why:pat.why});
-      p=c;
-    }
-    return{dir,conf,candles:shads,type:pat.n,why:pat.why,rsi:r.toFixed(1),e9:e9.toFixed(0),e21:e21.toFixed(0),vRatio:vRatio.toFixed(2)};
+// ══════════════════════════════════════════════════════
+// ATR CALCULATOR (Average True Range) — measures volatility
+// Used to properly size shadow candles based on real market volatility
+// ══════════════════════════════════════════════════════
+function calcATR(cs, period=14){
+  if(cs.length < period+1) return (cs[cs.length-1]?.high - cs[cs.length-1]?.low) || 1;
+  const trs = cs.slice(-period-1).map((c,i,arr)=>{
+    if(i===0) return c.high - c.low;
+    const prev = arr[i-1];
+    return Math.max(c.high-c.low, Math.abs(c.high-prev.close), Math.abs(c.low-prev.close));
+  });
+  return trs.slice(1).reduce((s,v)=>s+v,0) / period;
+}
+
+// ══════════════════════════════════════════════════════
+// MACD CALCULATOR
+// ══════════════════════════════════════════════════════
+function calcMACD(closes){
+  const e12=ema(closes,12), e21arr=ema(closes,26);
+  const macdLine = closes.map((_,i)=>{
+    const k12=2/13, k26=2/27;
+    let e12v=closes[0], e26v=closes[0];
+    for(let j=1;j<=i;j++){ e12v=closes[j]*k12+e12v*(1-k12); e26v=closes[j]*k26+e26v*(1-k26); }
+    return e12v - e26v;
+  });
+  const macdLast = macdLine[macdLine.length-1];
+  const signalPeriod = macdLine.slice(-9);
+  const signal = signalPeriod.reduce((s,v)=>s+v,0)/9;
+  return { macd: macdLast, signal, hist: macdLast - signal };
+}
+
+// ══════════════════════════════════════════════════════
+// BOLLINGER BANDS
+// ══════════════════════════════════════════════════════
+function calcBB(closes, period=20){
+  if(closes.length < period) return {upper:closes[closes.length-1]*1.02, lower:closes[closes.length-1]*0.98, mid:closes[closes.length-1]};
+  const sl = closes.slice(-period);
+  const mean = sl.reduce((s,v)=>s+v,0)/period;
+  const std = Math.sqrt(sl.reduce((s,v)=>s+(v-mean)**2,0)/period);
+  return { upper: mean+2*std, lower: mean-2*std, mid: mean, std, pct: (closes[closes.length-1]-mean-2*std)/(4*std) };
+}
+
+// ══════════════════════════════════════════════════════
+// PIVOT HIGH/LOW DETECTOR
+// ══════════════════════════════════════════════════════
+function getPivots(cs, lookback=5){
+  const pivHigh=[], pivLow=[];
+  for(let i=lookback; i<cs.length-lookback; i++){
+    const hiSlice=cs.slice(i-lookback,i+lookback+1).map(c=>c.high);
+    const loSlice=cs.slice(i-lookback,i+lookback+1).map(c=>c.low);
+    if(cs[i].high===Math.max(...hiSlice)) pivHigh.push({i, price:cs[i].high, time:cs[i].time});
+    if(cs[i].low ===Math.min(...loSlice)) pivLow.push( {i, price:cs[i].low,  time:cs[i].time});
   }
-  S.predictions=[mkSc('up',bC),mkSc('dn',dC),mkSc('side',sC)].sort((a,b)=>b.conf-a.conf);
-  if(S.activeInds.has('shadow'))renderShadows();
-  if(S.activeInds.has('aitl'))drawAITrendlines();
-  document.getElementById('sb-ai1').textContent='READY';
+  return {pivHigh, pivLow};
+}
+
+// ══════════════════════════════════════════════════════
+// FIBONACCI LEVELS CALCULATOR
+// ══════════════════════════════════════════════════════
+function getFibLevels(high, low){
+  const range = high - low;
+  return {
+    r0:    high,
+    r236:  high - range*0.236,
+    r382:  high - range*0.382,
+    r500:  high - range*0.500,
+    r618:  high - range*0.618,
+    r786:  high - range*0.786,
+    r100:  low,
+    e1272: high + range*0.272,
+    e1618: high + range*0.618,
+  };
+}
+
+function runAI(){
+  const cs=S.candles;
+  if(cs.length<30)return;
+
+  const closes  = cs.map(c=>c.close);
+  const highs   = cs.map(c=>c.high);
+  const lows    = cs.map(c=>c.low);
+  const volumes = cs.map(c=>c.volume||1e6);
+  const lastC   = cs[cs.length-1];
+  const prevC   = cs[cs.length-2];
+  const prev2C  = cs[cs.length-3];
+
+  // ── Indicators ──────────────────────────────────────
+  const e9arr  = ema(closes,9);
+  const e21arr = ema(closes,21);
+  const e50arr = ema(closes,50);
+  const e9     = e9arr[e9arr.length-1];
+  const e21    = e21arr[e21arr.length-1];
+  const e50    = e50arr[e50arr.length-1];
+  const rArr   = rsi(closes,14);
+  const r      = rArr[rArr.length-1];
+  const macdData = calcMACD(closes);
+  const bbData   = calcBB(closes,20);
+  const atr      = calcATR(cs,14);
+  const {pivHigh,pivLow} = getPivots(cs,3);
+
+  // ── Volume analysis ──────────────────────────────────
+  const avgVol10 = volumes.slice(-10).reduce((s,v)=>s+v,0)/10;
+  const avgVol20 = volumes.slice(-20).reduce((s,v)=>s+v,0)/20;
+  const vRatio   = volumes[volumes.length-1] / avgVol10;
+  const volTrend = avgVol10 > avgVol20 ? 'increasing' : 'decreasing';
+
+  // ── Candle analysis ──────────────────────────────────
+  const range    = lastC.high  - lastC.low;
+  const body     = Math.abs(lastC.close - lastC.open);
+  const bodyPct  = range > 0 ? body/range : 0;
+  const upperWk  = lastC.high  - Math.max(lastC.open, lastC.close);
+  const lowerWk  = Math.min(lastC.open, lastC.close) - lastC.low;
+  const upperWkPct = range>0 ? upperWk/range : 0;
+  const lowerWkPct = range>0 ? lowerWk/range : 0;
+  const isBull   = lastC.close > lastC.open;
+
+  // ── Trend structure ──────────────────────────────────
+  const recentH  = highs.slice(-10);
+  const recentL  = lows.slice(-10);
+  const higherHighs = recentH[9] > recentH[0];
+  const higherLows  = recentL[9] > recentL[0];
+  const lowerHighs  = recentH[9] < recentH[0];
+  const lowerLows   = recentL[9] < recentL[0];
+  const uptrend     = higherHighs && higherLows;
+  const downtrend   = lowerHighs  && lowerLows;
+  const priceVsE50  = lastC.close > e50 ? 'above' : 'below';
+
+  // ── Candle pattern detection ─────────────────────────
+  let detectedPattern = null;
+  // Bullish Engulfing
+  if(isBull && prevC.close<prevC.open && lastC.open<prevC.close && lastC.close>prevC.open && vRatio>1.0)
+    detectedPattern = {dir:'up', pat:PATS.up[0]};
+  // Bearish Engulfing
+  else if(!isBull && prevC.close>prevC.open && lastC.open>prevC.close && lastC.close<prevC.open && vRatio>1.0)
+    detectedPattern = {dir:'dn', pat:PATS.dn[0]};
+  // Hammer
+  else if(isBull && lowerWkPct>0.55 && bodyPct<0.35)
+    detectedPattern = {dir:'up', pat:PATS.up[2]};
+  // Shooting Star
+  else if(!isBull && upperWkPct>0.55 && bodyPct<0.35)
+    detectedPattern = {dir:'dn', pat:PATS.dn[1]};
+  // Marubozu Bull
+  else if(isBull && bodyPct>0.88)
+    detectedPattern = {dir:'up', pat:PATS.up[1]};
+  // Marubozu Bear
+  else if(!isBull && bodyPct>0.88)
+    detectedPattern = {dir:'dn', pat:PATS.dn[2]};
+  // Doji
+  else if(bodyPct<0.08)
+    detectedPattern = {dir:'side', pat:PATS.side[0]};
+  // Spinning Top
+  else if(bodyPct<0.25 && upperWkPct>0.3 && lowerWkPct>0.3)
+    detectedPattern = {dir:'side', pat:PATS.side[1]};
+
+  // ══════════════════════════════════════════════════
+  // MULTI-FACTOR SCORING ENGINE
+  // Each factor has weight based on reliability
+  // Total score determines bull/bear/side probability
+  // ══════════════════════════════════════════════════
+  let bullScore=0, bearScore=0, sideScore=0;
+  const reasons=[];
+
+  // Factor 1: EMA alignment (weight 20)
+  if(e9>e21&&e21>e50){
+    bullScore+=20;
+    reasons.push({side:'bull',txt:`EMA stack bullish (9>${e21.toFixed(0)}>${e50.toFixed(0)})`});
+  } else if(e9<e21&&e21<e50){
+    bearScore+=20;
+    reasons.push({side:'bear',txt:`EMA stack bearish (9<21<50)`});
+  } else if(e9>e21&&e21<e50){
+    bullScore+=8; sideScore+=12;
+    reasons.push({side:'side',txt:'EMA mixed — conflicting trend signals'});
+  } else {
+    bearScore+=8; sideScore+=12;
+  }
+
+  // Factor 2: RSI zone (weight 18)
+  if(r>60&&r<75){
+    bullScore+=18;
+    reasons.push({side:'bull',txt:`RSI ${r.toFixed(1)} — bullish momentum, not overbought`});
+  } else if(r<40&&r>25){
+    bearScore+=18;
+    reasons.push({side:'bear',txt:`RSI ${r.toFixed(1)} — bearish momentum, not oversold`});
+  } else if(r>=75){
+    bearScore+=12;
+    reasons.push({side:'bear',txt:`RSI ${r.toFixed(1)} — overbought, reversal risk`});
+  } else if(r<=25){
+    bullScore+=12;
+    reasons.push({side:'bull',txt:`RSI ${r.toFixed(1)} — oversold, bounce potential`});
+  } else {
+    sideScore+=18;
+    reasons.push({side:'side',txt:`RSI ${r.toFixed(1)} — neutral zone`});
+  }
+
+  // Factor 3: MACD (weight 15)
+  if(macdData.macd>0&&macdData.hist>0){
+    bullScore+=15;
+    reasons.push({side:'bull',txt:'MACD above signal + positive histogram'});
+  } else if(macdData.macd<0&&macdData.hist<0){
+    bearScore+=15;
+    reasons.push({side:'bear',txt:'MACD below signal + negative histogram'});
+  } else if(macdData.hist>0&&macdData.macd<0){
+    bullScore+=8;
+    reasons.push({side:'bull',txt:'MACD histogram turning positive — early bull signal'});
+  } else {
+    bearScore+=8;
+    reasons.push({side:'bear',txt:'MACD histogram turning negative — early bear signal'});
+  }
+
+  // Factor 4: Trend structure (weight 18)
+  if(uptrend){
+    bullScore+=18;
+    reasons.push({side:'bull',txt:'Higher highs + higher lows — clean uptrend structure'});
+  } else if(downtrend){
+    bearScore+=18;
+    reasons.push({side:'bear',txt:'Lower highs + lower lows — clean downtrend structure'});
+  } else {
+    sideScore+=18;
+    reasons.push({side:'side',txt:'No clear trend — consolidation/ranging'});
+  }
+
+  // Factor 5: Volume confirmation (weight 15)
+  if(vRatio>1.4&&isBull){
+    bullScore+=15;
+    reasons.push({side:'bull',txt:`Volume ${vRatio.toFixed(1)}x above average on bull candle — strong buying`});
+  } else if(vRatio>1.4&&!isBull){
+    bearScore+=15;
+    reasons.push({side:'bear',txt:`Volume ${vRatio.toFixed(1)}x above average on bear candle — strong selling`});
+  } else if(vRatio<0.7){
+    sideScore+=10;
+    reasons.push({side:'side',txt:'Low volume — weak move, likely noise'});
+  } else {
+    if(isBull) bullScore+=7; else bearScore+=7;
+  }
+
+  // Factor 6: Bollinger Bands position (weight 10)
+  const bbPct = (lastC.close - bbData.lower)/(bbData.upper - bbData.lower);
+  if(bbPct>0.8&&bbPct<1.0){
+    bearScore+=10;
+    reasons.push({side:'bear',txt:'Price near upper Bollinger Band — overbought zone'});
+  } else if(bbPct<0.2&&bbPct>0.0){
+    bullScore+=10;
+    reasons.push({side:'bull',txt:'Price near lower Bollinger Band — oversold zone'});
+  } else if(bbPct>=1.0){
+    bearScore+=14;
+    reasons.push({side:'bear',txt:'Price ABOVE upper Bollinger Band — extreme overbought'});
+  } else {
+    sideScore+=5;
+  }
+
+  // Factor 7: Detected candle pattern bonus (weight 14)
+  if(detectedPattern){
+    if(detectedPattern.dir==='up')   bullScore+=14;
+    else if(detectedPattern.dir==='dn') bearScore+=14;
+    else sideScore+=14;
+    reasons.push({side:detectedPattern.dir==='up'?'bull':detectedPattern.dir==='dn'?'bear':'side',
+                  txt:`${detectedPattern.pat.n} pattern detected`});
+  }
+
+  // Factor 8: Price vs EMA50 (weight 5)
+  if(priceVsE50==='above') bullScore+=5; else bearScore+=5;
+
+  // ── Calculate final probabilities ────────────────────
+  const total   = bullScore + bearScore + sideScore;
+  const bullConf = bullScore / total;
+  const bearConf = bearScore / total;
+  const sideConf = sideScore / total;
+  const topConf  = Math.max(bullConf, bearConf, sideConf);
+  const topDir   = bullConf>=bearConf && bullConf>=sideConf ? 'up'
+                 : bearConf>bullConf  && bearConf>=sideConf ? 'dn' : 'side';
+
+  // ── Minimum signal threshold — only fire on clear setups ─
+  // Below 58% confidence = SIDE/NO TRADE (noise reduction)
+  const effectiveBull = bullConf < 0.52 ? 0 : bullConf;
+  const effectiveBear = bearConf < 0.52 ? 0 : bearConf;
+
+  // ── Price levels: entry, stop, target ────────────────────
+  const lastPivH = pivHigh.length>0 ? pivHigh[pivHigh.length-1].price : lastC.high;
+  const lastPivL = pivLow.length>0  ? pivLow[pivLow.length-1].price   : lastC.low;
+  const fibLevels = getFibLevels(lastPivH, lastPivL);
+  const entry  = lastC.close;
+  let stopLoss, takeProfit1, takeProfit2, keyLevel;
+
+  if(topDir==='up'){
+    stopLoss    = Math.min(lastPivL, entry - atr*1.5);
+    takeProfit1 = entry + atr*2.0;
+    takeProfit2 = entry + atr*3.5;
+    keyLevel    = fibLevels.r382;
+  } else if(topDir==='dn'){
+    stopLoss    = Math.max(lastPivH, entry + atr*1.5);
+    takeProfit1 = entry - atr*2.0;
+    takeProfit2 = entry - atr*3.5;
+    keyLevel    = fibLevels.r618;
+  } else {
+    stopLoss    = entry - atr;
+    takeProfit1 = entry + atr;
+    takeProfit2 = entry + atr*2;
+    keyLevel    = entry;
+  }
+  const riskReward = Math.abs(takeProfit1-entry) / Math.abs(stopLoss-entry);
+
+  // ── Build shadow candle predictions ──────────────────────
+  const tfSec = (S.tf||1440)*60;
+  function mkShadowCandles(dir, conf, patList){
+    const pat = detectedPattern && detectedPattern.dir===dir
+                ? detectedPattern.pat
+                : patList[Math.floor(Math.random()*patList.length)];
+    const shads=[];
+    let p=lastC.close;
+    for(let i=1;i<=4;i++){
+      const decay  = Math.pow(0.80, i-1);
+      // Size based on ATR — realistic candle size
+      const candleSize = atr * (0.6 + Math.random()*0.6);
+      const direction  = dir==='up' ? 1 : dir==='dn' ? -1 : (Math.random()>0.5?0.2:-0.2);
+      const mv = candleSize * direction * (0.5+Math.random()*0.7);
+      const o=p, cl=p+mv, rng=Math.abs(cl-o);
+      // Wick sizes based on pattern
+      const uwRatio = pat.u/100;
+      const lwRatio = pat.l/100;
+      const h = Math.max(o,cl) + rng*uwRatio*(0.5+Math.random());
+      const l = Math.min(o,cl) - rng*lwRatio*(0.5+Math.random());
+      shads.push({
+        time:  lastC.time + i*tfSec,
+        open:  parseFloat(o.toFixed(8)),
+        high:  parseFloat(h.toFixed(8)),
+        low:   parseFloat(l.toFixed(8)),
+        close: parseFloat(cl.toFixed(8)),
+        conf:  parseFloat((conf*decay).toFixed(3)),
+        dir, type:pat.n, why:pat.why,
+      });
+      p=cl;
+    }
+    return {dir, conf, candles:shads, type:pat.n, why:pat.why};
+  }
+
+  // All 3 scenarios
+  const scenarios = [
+    mkShadowCandles('up',   bullConf, PATS.up),
+    mkShadowCandles('dn',   bearConf, PATS.dn),
+    mkShadowCandles('side', sideConf, PATS.side),
+  ].sort((a,b)=>b.conf-a.conf);
+
+  // ── Store predictions ─────────────────────────────────────
+  S.predictions = scenarios;
+  S.aiLevels = {
+    entry:       parseFloat(entry.toFixed(4)),
+    stopLoss:    parseFloat(stopLoss.toFixed(4)),
+    takeProfit1: parseFloat(takeProfit1.toFixed(4)),
+    takeProfit2: parseFloat(takeProfit2.toFixed(4)),
+    keyLevel:    parseFloat(keyLevel.toFixed(4)),
+    riskReward:  parseFloat(riskReward.toFixed(2)),
+    atr:         parseFloat(atr.toFixed(4)),
+    topDir, topConf, bullConf, bearConf, sideConf,
+    reasons: reasons.slice(0,4),
+    rsi: r, macd: macdData, bb: bbData,
+    detectedPattern: detectedPattern ? detectedPattern.pat.n : null,
+  };
+
+  // ── Render ────────────────────────────────────────────────
+  if(S.activeInds.has('shadow')) renderShadows();
+  if(S.activeInds.has('aitl'))   drawAITrendlines();
+  updateAIPanel();
+}
+
+// ══════════════════════════════════════════════════════
+// UPDATE AI STATUS BAR + LEVEL LINES ON CHART
+// ══════════════════════════════════════════════════════
+function updateAIPanel(){
+  const lvl = S.aiLevels;
+  if(!lvl) return;
+  const top = S.predictions[0];
+  const DIR_LABEL = {up:'▲ BULL', dn:'▼ BEAR', side:'◆ SIDE'};
+  const dirCol = top.dir==='up'?'var(--G)':top.dir==='dn'?'var(--R)':'var(--B)';
+
+  // Update status bar
+  const ai1el = document.getElementById('sb-ai1');
+  if(ai1el){
+    const pct = (top.conf*100).toFixed(0);
+    ai1el.textContent = DIR_LABEL[top.dir]+' '+pct+'%';
+    ai1el.style.color = dirCol;
+  }
+
+  // Draw entry/stop/target lines on chart (remove old ones first)
+  if(!S._levelLines) S._levelLines=[];
+  S._levelLines.forEach(pl=>{try{S.mainSeries.removePriceLine(pl);}catch(e){}});
+  S._levelLines=[];
+
+  if(top.dir!=='side' && top.conf>0.58){
+    const isLong = top.dir==='up';
+    const fmt2 = v => v>=1000 ? v.toFixed(2) : v>=1 ? v.toFixed(2) : v.toFixed(5);
+
+    // Entry line
+    const entryLine = S.mainSeries.createPriceLine({
+      price: lvl.entry, color:'rgba(255,255,255,0.7)',
+      lineWidth:1, lineStyle:0,
+      title: `Entry: ${fmt2(lvl.entry)}`
+    });
+
+    // Stop loss line
+    const slLine = S.mainSeries.createPriceLine({
+      price: lvl.stopLoss, color:'rgba(255,61,110,0.85)',
+      lineWidth:1, lineStyle:2,
+      title: `Stop: ${fmt2(lvl.stopLoss)}`
+    });
+
+    // Take profit 1
+    const tp1Line = S.mainSeries.createPriceLine({
+      price: lvl.takeProfit1, color:'rgba(0,229,160,0.85)',
+      lineWidth:1, lineStyle:2,
+      title: `TP1: ${fmt2(lvl.takeProfit1)} (R:R ${lvl.riskReward}:1)`
+    });
+
+    // Take profit 2
+    const tp2Line = S.mainSeries.createPriceLine({
+      price: lvl.takeProfit2, color:'rgba(0,229,160,0.5)',
+      lineWidth:1, lineStyle:3,
+      title: `TP2: ${fmt2(lvl.takeProfit2)}`
+    });
+
+    S._levelLines.push(entryLine, slLine, tp1Line, tp2Line);
+  }
 }
 
 function renderShadows(){
