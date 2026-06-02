@@ -18,7 +18,7 @@ import websocket
 # ── Flask setup — serves HTML from same folder ──────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app      = Flask(__name__, static_folder=BASE_DIR)
-socket   = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socket   = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
 # ── Global state ─────────────────────────────────────────────
 candles = {

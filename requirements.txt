@@ -4,5 +4,6 @@ websocket-client
 requests
 pandas
 numpy
-eventlet
+gevent
+gevent-websocket
 gunicorn
